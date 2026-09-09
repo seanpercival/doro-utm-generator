@@ -453,7 +453,9 @@ export function UtmGenerator() {
           status={savedUrls.status}
           error={savedUrls.error}
           onReload={savedUrls.reload}
+          noteStatus={savedUrls.noteStatus}
           onSetNote={savedUrls.setNote}
+          onRetryNote={savedUrls.retryNote}
           onRemove={savedUrls.remove}
           onClear={savedUrls.clear}
         />

@@ -1,12 +1,12 @@
 "use client"
 
 import { useState } from "react"
-import { Bookmark, Check, Copy, Download, Trash2 } from "lucide-react"
+import { AlertCircle, Bookmark, Check, Copy, Download, Loader2, Trash2 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
-import { type SavedUrl, toCsv } from "@/lib/saved-urls-store"
+import { type NoteStatus, type SavedUrl, toCsv } from "@/lib/saved-urls-store"
 import { COUNTRIES } from "@/lib/utm-config"
 
 type Props = {
@@ -14,7 +14,9 @@ type Props = {
   status: "idle" | "loading" | "ready" | "error"
   error: string | null
   onReload: () => void
+  noteStatus: Record<string, NoteStatus>
   onSetNote: (id: string, note: string) => void
+  onRetryNote: (id: string) => void
   onRemove: (id: string) => void
   onClear: () => void
 }
@@ -26,7 +28,46 @@ function formatDate(iso: string) {
   return isNaN(d.getTime()) ? "" : d.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })
 }
 
-export function SavedUrlsLog({ entries, status, error, onReload, onSetNote, onRemove, onClear }: Props) {
+function NoteStatusBadge({ status, onRetry }: { status?: NoteStatus; onRetry: () => void }) {
+  if (!status) return null
+  const base = "inline-flex shrink-0 items-center gap-1 text-xs whitespace-nowrap"
+  switch (status) {
+    case "pending":
+    case "saving":
+      return (
+        <span className={`${base} text-muted-foreground`} aria-live="polite">
+          <Loader2 className="size-3 animate-spin" />
+          Saving…
+        </span>
+      )
+    case "saved":
+      return (
+        <span className={`${base} text-primary`} aria-live="polite">
+          <Check className="size-3" />
+          Saved
+        </span>
+      )
+    case "error":
+      return (
+        <button type="button" onClick={onRetry} className={`${base} text-destructive hover:underline`} aria-live="polite">
+          <AlertCircle className="size-3" />
+          Not saved — retry
+        </button>
+      )
+  }
+}
+
+export function SavedUrlsLog({
+  entries,
+  status,
+  error,
+  onReload,
+  noteStatus,
+  onSetNote,
+  onRetryNote,
+  onRemove,
+  onClear,
+}: Props) {
   const [copiedId, setCopiedId] = useState<string | null>(null)
 
   const copy = async (e: SavedUrl) => {
@@ -115,13 +156,16 @@ export function SavedUrlsLog({ entries, status, error, onReload, onSetNote, onRe
                   >
                     {e.url}
                   </a>
-                  <Input
-                    value={e.note}
-                    onChange={(ev) => onSetNote(e.id, ev.target.value)}
-                    placeholder="Add a note (e.g. where this link is used, who owns it)"
-                    className="h-8 text-xs"
-                    aria-label="Note"
-                  />
+                  <div className="flex items-center gap-2">
+                    <Input
+                      value={e.note}
+                      onChange={(ev) => onSetNote(e.id, ev.target.value)}
+                      placeholder="Add a note (e.g. where this link is used, who owns it) — saves automatically"
+                      className="h-8 text-xs"
+                      aria-label="Note"
+                    />
+                    <NoteStatusBadge status={noteStatus[e.id]} onRetry={() => onRetryNote(e.id)} />
+                  </div>
                 </div>
                 <div className="flex gap-1 md:flex-col">
                   <Button variant="outline" size="sm" onClick={() => copy(e)} className="flex-1 md:flex-none">

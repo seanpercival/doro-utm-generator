@@ -15,9 +15,16 @@ export type SavedUrl = {
 }
 
 type Status = "idle" | "loading" | "ready" | "error"
-type State = { entries: SavedUrl[]; status: Status; error: string | null }
+/** Per-entry note save state: pending = waiting for typing to stop, saving = request in flight. */
+export type NoteStatus = "pending" | "saving" | "saved" | "error"
+type State = {
+  entries: SavedUrl[]
+  status: Status
+  error: string | null
+  noteStatus: Record<string, NoteStatus>
+}
 
-const SERVER_STATE: State = { entries: [], status: "idle", error: null }
+const SERVER_STATE: State = { entries: [], status: "idle", error: null, noteStatus: {} }
 let state: State = SERVER_STATE
 const listeners = new Set<() => void>()
 
@@ -50,7 +57,33 @@ async function load() {
 }
 
 // Debounced note updates so typing doesn't fire a request per keystroke.
+const NOTE_DEBOUNCE_MS = 800
 const noteTimers = new Map<string, ReturnType<typeof setTimeout>>()
+const noteClearTimers = new Map<string, ReturnType<typeof setTimeout>>()
+
+function setNoteStatus(id: string, status: NoteStatus | null) {
+  const next = { ...state.noteStatus }
+  if (status) next[id] = status
+  else delete next[id]
+  setState({ noteStatus: next })
+}
+
+async function saveNote(id: string, note: string) {
+  setNoteStatus(id, "saving")
+  try {
+    const res = await fetch(`/api/saved-urls/${id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ note }),
+    })
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    setNoteStatus(id, "saved")
+    clearTimeout(noteClearTimers.get(id))
+    noteClearTimers.set(id, setTimeout(() => setNoteStatus(id, null), 2500))
+  } catch {
+    setNoteStatus(id, "error")
+  }
+}
 
 export type AddResult = "saved" | "exists" | "error"
 
@@ -85,24 +118,20 @@ export function useSavedUrls() {
   )
 
   const setNote = useCallback((id: string, note: string) => {
-    // Optimistic local update, then a debounced PATCH.
+    // Optimistic local update; the PATCH fires once typing pauses.
     setState({ entries: state.entries.map((e) => (e.id === id ? { ...e, note } : e)) })
+    clearTimeout(noteClearTimers.get(id))
+    setNoteStatus(id, "pending")
     clearTimeout(noteTimers.get(id))
-    noteTimers.set(
-      id,
-      setTimeout(async () => {
-        try {
-          const res = await fetch(`/api/saved-urls/${id}`, {
-            method: "PATCH",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({ note }),
-          })
-          if (!res.ok) throw new Error(`HTTP ${res.status}`)
-        } catch (e) {
-          fail(e, "Failed to save note")
-        }
-      }, 500),
-    )
+    noteTimers.set(id, setTimeout(() => void saveNote(id, note), NOTE_DEBOUNCE_MS))
+  }, [])
+
+  /** Retry a failed note save immediately. */
+  const retryNote = useCallback((id: string) => {
+    const entry = state.entries.find((e) => e.id === id)
+    if (!entry) return
+    clearTimeout(noteTimers.get(id))
+    void saveNote(id, entry.note)
   }, [])
 
   const remove = useCallback(async (id: string) => {
@@ -129,7 +158,18 @@ export function useSavedUrls() {
     }
   }, [])
 
-  return { entries: s.entries, status: s.status, error: s.error, add, setNote, remove, clear, reload: load }
+  return {
+    entries: s.entries,
+    status: s.status,
+    error: s.error,
+    noteStatus: s.noteStatus,
+    add,
+    setNote,
+    retryNote,
+    remove,
+    clear,
+    reload: load,
+  }
 }
 
 /** CSV export of the log (Excel-friendly). */
