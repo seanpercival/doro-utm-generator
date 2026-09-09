@@ -1,36 +1,38 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Doro UTM Generator
 
-## Getting Started
+Generate consistent UTM parameters for cross-market campaign tracking on [doro.com](https://www.doro.com).
 
-First, run the development server:
+A Doro version of the Xplora UTM generator, using the taxonomy from the
+**Doro – UTM-tagging tool – Global – 2025** spreadsheet (PHD / Annalect).
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+## UTM convention
+
+| Parameter      | Field            | Values                                                                  |
+| -------------- | ---------------- | ----------------------------------------------------------------------- |
+| `utm_medium`   | Channel          | `channel_objective`, e.g. `paid_social_awa`, `display_pur`, `email_crm` — locked global list |
+| `utm_source`   | Publisher        | Platform / media partner, e.g. `facebook`, `programmatic`, `bonnier`    |
+| `utm_campaign` | Campaign         | Free text: short, English, lowercase, words separated by `_`            |
+| `utm_content`  | Creative variant | Optional, only appended when filled                                     |
+
+Objective suffixes: `awa` awareness · `con` consideration · `pur` purchase · `crm` existing customers.
+
+Example output:
+
+```
+https://www.doro.com/fr-fr/?utm_medium=paid_social_awa&utm_source=facebook&utm_campaign=summer&utm_content=blue_glasses
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Landing pages default to the market sub-folder (`https://www.doro.com/{locale}/`) — 17 locales
+from the [change-country page](https://www.doro.com/nb-no/change-country/) — and can be edited to any page.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+Channels and publishers live in [`lib/utm-config.ts`](lib/utm-config.ts). Per the sheet's READ ME,
+add new publishers freely; coordinate channel changes with Annalect.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Development
 
-## Learn More
+```bash
+npm install
+npm run dev
+```
 
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Built with Next.js (App Router), Tailwind CSS v4, shadcn/ui and `qrcode`.
