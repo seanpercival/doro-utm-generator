@@ -25,8 +25,15 @@ https://www.doro.com/fr-fr/?utm_medium=paid_social_awa&utm_source=facebook&utm_c
 Landing pages default to the market sub-folder (`https://www.doro.com/{locale}/`) — 17 locales
 from the [change-country page](https://www.doro.com/nb-no/change-country/) — and can be edited to any page.
 
-Channels and publishers live in [`lib/utm-config.ts`](lib/utm-config.ts). Per the sheet's READ ME,
+Default channels and publishers live in [`lib/utm-config.ts`](lib/utm-config.ts). Per the sheet's READ ME,
 add new publishers freely; coordinate channel changes with Annalect.
+
+## Editing the dropdowns
+
+**Manage options** (in the Campaign Details card) opens a dialog to add, rename or remove channels,
+publishers and their groups. Edits are stored in the browser (localStorage) and marked with an
+"edited" badge. Use **Export** / **Import** to share a list as JSON, and **Reset to defaults** to
+go back to the sheet's lists. To change the defaults for everyone, edit `lib/utm-config.ts`.
 
 ## Development
 

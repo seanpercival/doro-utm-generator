@@ -1,11 +1,12 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useState, useSyncExternalStore } from "react"
 import QRCode from "qrcode"
-import { Check, Copy, Download, Link2, Mail, RotateCcw, Share2 } from "lucide-react"
+import { Check, Copy, Download, Link2, Mail, RotateCcw, Settings2, Share2 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { ManageOptionsDialog } from "@/components/manage-options-dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import {
@@ -17,12 +18,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { useTaxonomy } from "@/lib/taxonomy-store"
 import {
-  CHANNEL_GROUPS,
   COUNTRIES,
   CUSTOM_PUBLISHER,
   DEFAULT_COUNTRY,
-  PUBLISHER_GROUPS,
   baseUrlFor,
   buildUtmUrl,
   channelDescription,
@@ -31,15 +31,17 @@ import {
 } from "@/lib/utm-config"
 
 const countryItems = Object.fromEntries(COUNTRIES.map((c) => [c.code, `${c.flag} ${countryLabel(c)}`]))
-const publisherItems: Record<string, string> = {
-  ...Object.fromEntries(PUBLISHER_GROUPS.flatMap((g) => g.publishers.map((p) => [p, p]))),
-  [CUSTOM_PUBLISHER]: "Other (custom)…",
-}
+
+const noopSubscribe = () => () => {}
+const canShareSnapshot = () => typeof navigator !== "undefined" && typeof navigator.share === "function"
+const canShareServer = () => false
 
 const DEFAULTS = {
   country: DEFAULT_COUNTRY,
   medium: "paid_social_awa",
   source: "facebook",
+  /** Pre-filled so the full URL, QR code and actions are visible on load. */
+  campaign: "campaign_name",
 }
 
 export function UtmGenerator() {
@@ -48,40 +50,52 @@ export function UtmGenerator() {
   const [medium, setMedium] = useState(DEFAULTS.medium)
   const [source, setSource] = useState(DEFAULTS.source)
   const [customSource, setCustomSource] = useState("")
-  const [campaign, setCampaign] = useState("")
+  const [campaign, setCampaign] = useState(DEFAULTS.campaign)
   const [content, setContent] = useState("")
   const [copied, setCopied] = useState(false)
-  const [qrDataUrl, setQrDataUrl] = useState("")
-  const [canShare, setCanShare] = useState(false)
+  const [qr, setQr] = useState<{ url: string; data: string } | null>(null)
+  const [manageOpen, setManageOpen] = useState(false)
+  const canShare = useSyncExternalStore(noopSubscribe, canShareSnapshot, canShareServer)
 
-  useEffect(() => {
-    setCanShare(typeof navigator !== "undefined" && typeof navigator.share === "function")
-  }, [])
+  const { taxonomy, save: saveTaxonomy, reset: resetTaxonomy, isCustomized } = useTaxonomy()
+  const channelGroups = taxonomy.channelGroups
+  const publisherGroups = taxonomy.publisherGroups
+  const allChannels = useMemo(() => channelGroups.flatMap((g) => g.options), [channelGroups])
+  const allPublishers = useMemo(() => publisherGroups.flatMap((g) => g.options), [publisherGroups])
+  const publisherItems = useMemo<Record<string, string>>(
+    () => ({ ...Object.fromEntries(allPublishers.map((p) => [p, p])), [CUSTOM_PUBLISHER]: "Other (custom)…" }),
+    [allPublishers],
+  )
 
-  const resolvedSource = source === CUSTOM_PUBLISHER ? sanitizeToken(customSource) : source
+  // If a selected option was removed via "Manage options", fall back to the first available one.
+  const effectiveMedium = allChannels.includes(medium) ? medium : (allChannels[0] ?? "")
+  const effectiveSource =
+    source === CUSTOM_PUBLISHER || allPublishers.includes(source) ? source : (allPublishers[0] ?? "")
+
+  const resolvedSource = effectiveSource === CUSTOM_PUBLISHER ? sanitizeToken(customSource) : effectiveSource
 
   const generatedUrl = useMemo(
-    () => buildUtmUrl({ landingPage, medium, source: resolvedSource, campaign, content }),
-    [landingPage, medium, resolvedSource, campaign, content],
+    () => buildUtmUrl({ landingPage, medium: effectiveMedium, source: resolvedSource, campaign, content }),
+    [landingPage, effectiveMedium, resolvedSource, campaign, content],
   )
 
   const isComplete = Boolean(generatedUrl)
 
   useEffect(() => {
-    if (!generatedUrl) {
-      setQrDataUrl("")
-      return
-    }
+    if (!generatedUrl) return
     let cancelled = false
     QRCode.toDataURL(generatedUrl, { width: 220, margin: 2 })
-      .then((d) => {
-        if (!cancelled) setQrDataUrl(d)
+      .then((data) => {
+        if (!cancelled) setQr({ url: generatedUrl, data })
       })
-      .catch(() => setQrDataUrl(""))
+      .catch(() => {})
     return () => {
       cancelled = true
     }
   }, [generatedUrl])
+
+  // Only show a QR code that matches the current URL.
+  const qrDataUrl = qr && qr.url === generatedUrl ? qr.data : ""
 
   const handleCountryChange = (code: string | null) => {
     if (!code) return
@@ -126,7 +140,7 @@ export function UtmGenerator() {
     setMedium(DEFAULTS.medium)
     setSource(DEFAULTS.source)
     setCustomSource("")
-    setCampaign("")
+    setCampaign(DEFAULTS.campaign)
     setContent("")
   }
 
@@ -186,6 +200,17 @@ export function UtmGenerator() {
             <CardHeader>
               <CardTitle>3. Campaign Details</CardTitle>
               <CardDescription>Fill in the tracking parameters</CardDescription>
+              <CardAction>
+                <Button variant="outline" size="sm" onClick={() => setManageOpen(true)}>
+                  <Settings2 data-icon="inline-start" />
+                  Manage options
+                  {isCustomized && (
+                    <span className="ml-1 rounded-full bg-primary/15 px-1.5 text-[10px] font-semibold text-primary">
+                      edited
+                    </span>
+                  )}
+                </Button>
+              </CardAction>
             </CardHeader>
             <CardContent className="space-y-6">
               <div className="grid gap-6 sm:grid-cols-2">
@@ -194,15 +219,15 @@ export function UtmGenerator() {
                     Channel <span className="text-destructive">*</span>{" "}
                     <span className="font-mono text-xs text-muted-foreground">utm_medium</span>
                   </Label>
-                  <Select value={medium} onValueChange={(v) => v && setMedium(v)}>
+                  <Select value={effectiveMedium} onValueChange={(v) => v && setMedium(v)}>
                     <SelectTrigger id="medium" className="w-full">
                       <SelectValue placeholder="Select channel" />
                     </SelectTrigger>
                     <SelectContent>
-                      {CHANNEL_GROUPS.map((g) => (
+                      {channelGroups.map((g) => (
                         <SelectGroup key={g.label}>
                           <SelectLabel>{g.label}</SelectLabel>
-                          {g.channels.map((ch) => (
+                          {g.options.map((ch) => (
                             <SelectItem key={ch} value={ch}>
                               <span className="font-mono">{ch}</span>
                               <span className="ml-auto pl-2 text-xs text-muted-foreground">
@@ -224,15 +249,15 @@ export function UtmGenerator() {
                     Publisher <span className="text-destructive">*</span>{" "}
                     <span className="font-mono text-xs text-muted-foreground">utm_source</span>
                   </Label>
-                  <Select value={source} onValueChange={(v) => v && setSource(v)} items={publisherItems}>
+                  <Select value={effectiveSource} onValueChange={(v) => v && setSource(v)} items={publisherItems}>
                     <SelectTrigger id="source" className="w-full">
                       <SelectValue placeholder="Select publisher" />
                     </SelectTrigger>
                     <SelectContent>
-                      {PUBLISHER_GROUPS.map((g) => (
+                      {publisherGroups.map((g) => (
                         <SelectGroup key={g.label}>
                           <SelectLabel>{g.label}</SelectLabel>
-                          {g.publishers.map((p) => (
+                          {g.options.map((p) => (
                             <SelectItem key={p} value={p}>
                               {p}
                             </SelectItem>
@@ -245,7 +270,7 @@ export function UtmGenerator() {
                       </SelectGroup>
                     </SelectContent>
                   </Select>
-                  {source === CUSTOM_PUBLISHER && (
+                  {effectiveSource === CUSTOM_PUBLISHER && (
                     <Input
                       id="customSource"
                       placeholder="e.g. aftonbladet"
@@ -264,7 +289,7 @@ export function UtmGenerator() {
                 </Label>
                 <Input
                   id="campaign"
-                  placeholder="e.g. black_friday_2026"
+                  placeholder="e.g. black_friday_2026, aurora_launch"
                   value={campaign}
                   onChange={(e) => setCampaign(sanitizeToken(e.target.value))}
                 />
@@ -316,7 +341,7 @@ export function UtmGenerator() {
 
                   <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-xs">
                     <dt className="font-mono text-muted-foreground">utm_medium</dt>
-                    <dd className="font-mono">{medium}</dd>
+                    <dd className="font-mono">{effectiveMedium}</dd>
                     <dt className="font-mono text-muted-foreground">utm_source</dt>
                     <dd className="font-mono">{resolvedSource}</dd>
                     <dt className="font-mono text-muted-foreground">utm_campaign</dt>
@@ -380,6 +405,14 @@ export function UtmGenerator() {
           </Card>
         </div>
       </div>
+
+      <ManageOptionsDialog
+        open={manageOpen}
+        onOpenChange={setManageOpen}
+        taxonomy={taxonomy}
+        onSave={saveTaxonomy}
+        onReset={resetTaxonomy}
+      />
 
       <p className="mt-12 text-center text-xs text-muted-foreground">
         Taxonomy based on the Doro global UTM-tagging tool (PHD / Annalect, 2025). Channel list is global —
