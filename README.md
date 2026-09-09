@@ -35,6 +35,13 @@ publishers and their groups. Edits are stored in the browser (localStorage) and 
 "edited" badge. Use **Export** / **Import** to share a list as JSON, and **Reset to defaults** to
 go back to the sheet's lists. To change the defaults for everyone, edit `lib/utm-config.ts`.
 
+## Saved URLs log
+
+**Save** (next to Copy / Email) adds the current URL to a log at the bottom of the page. Each entry
+shows when it was created, its parameters and the full URL, and has a free-text note, Copy and
+Delete. **Export CSV** downloads the whole log; **Clear all** empties it. Like the option lists, the log
+is stored in the browser (localStorage).
+
 ## Development
 
 ```bash

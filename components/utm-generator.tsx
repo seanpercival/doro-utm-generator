@@ -2,11 +2,12 @@
 
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react"
 import QRCode from "qrcode"
-import { Check, Copy, Download, Link2, Mail, RotateCcw, Settings2, Share2 } from "lucide-react"
+import { Bookmark, BookmarkCheck, Check, Copy, Download, Link2, Mail, RotateCcw, Settings2, Share2 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { ManageOptionsDialog } from "@/components/manage-options-dialog"
+import { SavedUrlsLog } from "@/components/saved-urls-log"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import {
@@ -18,6 +19,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { useSavedUrls } from "@/lib/saved-urls-store"
 import { useTaxonomy } from "@/lib/taxonomy-store"
 import {
   COUNTRIES,
@@ -55,6 +57,8 @@ export function UtmGenerator() {
   const [copied, setCopied] = useState(false)
   const [qr, setQr] = useState<{ url: string; data: string } | null>(null)
   const [manageOpen, setManageOpen] = useState(false)
+  const [saveState, setSaveState] = useState<"idle" | "saved" | "exists">("idle")
+  const savedUrls = useSavedUrls()
   const canShare = useSyncExternalStore(noopSubscribe, canShareSnapshot, canShareServer)
 
   const { taxonomy, save: saveTaxonomy, reset: resetTaxonomy, isCustomized } = useTaxonomy()
@@ -108,6 +112,20 @@ export function UtmGenerator() {
     await navigator.clipboard.writeText(generatedUrl)
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
+  }
+
+  const handleSave = () => {
+    if (!generatedUrl) return
+    const added = savedUrls.add({
+      url: generatedUrl,
+      country,
+      medium: effectiveMedium,
+      source: resolvedSource,
+      campaign,
+      content,
+    })
+    setSaveState(added ? "saved" : "exists")
+    setTimeout(() => setSaveState("idle"), 2000)
   }
 
   const handleEmail = () => {
@@ -354,7 +372,7 @@ export function UtmGenerator() {
                     )}
                   </dl>
 
-                  <div className="grid grid-cols-2 gap-2">
+                  <div className="grid grid-cols-3 gap-2">
                     <Button onClick={handleCopy} size="lg">
                       {copied ? (
                         <>
@@ -372,8 +390,21 @@ export function UtmGenerator() {
                       <Mail data-icon="inline-start" />
                       Email
                     </Button>
+                    <Button onClick={handleSave} size="lg" variant="outline" title="Save to the log below">
+                      {saveState === "idle" ? (
+                        <>
+                          <Bookmark data-icon="inline-start" />
+                          Save
+                        </>
+                      ) : (
+                        <>
+                          <BookmarkCheck data-icon="inline-start" />
+                          {saveState === "saved" ? "Saved!" : "Already saved"}
+                        </>
+                      )}
+                    </Button>
                     {canShare && (
-                      <Button onClick={handleShare} size="lg" variant="outline" className="col-span-2">
+                      <Button onClick={handleShare} size="lg" variant="outline" className="col-span-3">
                         <Share2 data-icon="inline-start" />
                         Share
                       </Button>
@@ -404,6 +435,15 @@ export function UtmGenerator() {
             </CardContent>
           </Card>
         </div>
+      </div>
+
+      <div className="mt-8">
+        <SavedUrlsLog
+          entries={savedUrls.entries}
+          onSetNote={savedUrls.setNote}
+          onRemove={savedUrls.remove}
+          onClear={savedUrls.clear}
+        />
       </div>
 
       <ManageOptionsDialog
