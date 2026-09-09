@@ -11,6 +11,9 @@ import { COUNTRIES } from "@/lib/utm-config"
 
 type Props = {
   entries: SavedUrl[]
+  status: "idle" | "loading" | "ready" | "error"
+  error: string | null
+  onReload: () => void
   onSetNote: (id: string, note: string) => void
   onRemove: (id: string) => void
   onClear: () => void
@@ -23,7 +26,7 @@ function formatDate(iso: string) {
   return isNaN(d.getTime()) ? "" : d.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })
 }
 
-export function SavedUrlsLog({ entries, onSetNote, onRemove, onClear }: Props) {
+export function SavedUrlsLog({ entries, status, error, onReload, onSetNote, onRemove, onClear }: Props) {
   const [copiedId, setCopiedId] = useState<string | null>(null)
 
   const copy = async (e: SavedUrl) => {
@@ -43,7 +46,7 @@ export function SavedUrlsLog({ entries, onSetNote, onRemove, onClear }: Props) {
   }
 
   const clearAll = () => {
-    if (window.confirm(`Delete all ${entries.length} saved URLs? This cannot be undone.`)) onClear()
+    if (window.confirm(`Delete all ${entries.length} saved URLs for everyone? This cannot be undone.`)) onClear()
   }
 
   return (
@@ -59,7 +62,7 @@ export function SavedUrlsLog({ entries, onSetNote, onRemove, onClear }: Props) {
           )}
         </CardTitle>
         <CardDescription>
-          Every URL you save with the Save button. Stored in this browser — export to CSV to keep a copy.
+          Every URL saved with the Save button, shared with everyone who uses this tool.
         </CardDescription>
         {entries.length > 0 && (
           <CardAction className="flex gap-2">
@@ -75,7 +78,17 @@ export function SavedUrlsLog({ entries, onSetNote, onRemove, onClear }: Props) {
         )}
       </CardHeader>
       <CardContent>
-        {entries.length === 0 ? (
+        {error && (
+          <p className="mb-3 flex items-center justify-between gap-2 rounded-md bg-destructive/10 px-3 py-2 text-xs text-destructive">
+            <span>{error}</span>
+            <Button variant="ghost" size="xs" onClick={onReload}>
+              Retry
+            </Button>
+          </p>
+        )}
+        {status === "loading" || status === "idle" ? (
+          <p className="py-8 text-center text-sm text-muted-foreground">Loading saved URLs…</p>
+        ) : entries.length === 0 ? (
           <p className="py-8 text-center text-sm text-muted-foreground">
             No saved URLs yet. Generate a URL above and press <span className="font-medium">Save</span>.
           </p>
@@ -85,7 +98,7 @@ export function SavedUrlsLog({ entries, onSetNote, onRemove, onClear }: Props) {
               <li key={e.id} className="grid gap-2 py-4 first:pt-0 last:pb-0 md:grid-cols-[1fr_auto] md:gap-4">
                 <div className="min-w-0 space-y-2">
                   <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
-                    <span>{formatDate(e.createdAt)}</span>
+                    <span>{formatDate(e.created_at)}</span>
                     <span>
                       {countryFlag(e.country)} {e.country}
                     </span>

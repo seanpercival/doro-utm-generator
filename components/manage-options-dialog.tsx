@@ -28,8 +28,8 @@ type Props = {
   open: boolean
   onOpenChange: (open: boolean) => void
   taxonomy: Taxonomy
-  onSave: (t: Taxonomy) => void
-  onReset: () => void
+  onSave: (t: Taxonomy) => Promise<boolean>
+  onReset: () => Promise<boolean>
 }
 
 export function ManageOptionsDialog({ open, onOpenChange, taxonomy, onSave, onReset }: Props) {
@@ -45,24 +45,37 @@ function ManageOptionsBody({ onOpenChange, taxonomy, onSave, onReset }: Omit<Pro
   // Work on a draft so Cancel discards edits.
   const [draft, setDraft] = useState<Taxonomy>(() => structuredClone(taxonomy))
   const [error, setError] = useState("")
+  const [busy, setBusy] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
 
   const updateGroups = (key: keyof Taxonomy, groups: OptionGroup[]) =>
     setDraft((d) => ({ ...d, [key]: groups }))
 
-  const handleSave = () => {
+  const handleSave = async () => {
     const cleaned = cleanTaxonomy(draft)
     if (cleaned.channelGroups.length === 0 || cleaned.publisherGroups.length === 0) {
       setError("You need at least one channel and one publisher.")
       return
     }
-    onSave(cleaned)
+    setBusy(true)
+    const ok = await onSave(cleaned)
+    setBusy(false)
+    if (!ok) {
+      setError("Could not save to the shared database. Please try again.")
+      return
+    }
     onOpenChange(false)
   }
 
-  const handleReset = () => {
-    if (!window.confirm("Restore the default channel and publisher lists? Your custom edits will be lost.")) return
-    onReset()
+  const handleReset = async () => {
+    if (!window.confirm("Restore the default channel and publisher lists for everyone? Custom edits will be lost.")) return
+    setBusy(true)
+    const ok = await onReset()
+    setBusy(false)
+    if (!ok) {
+      setError("Could not reset the shared lists. Please try again.")
+      return
+    }
     setDraft(structuredClone(DEFAULT_TAXONOMY))
     setError("")
   }
@@ -96,8 +109,8 @@ function ManageOptionsBody({ onOpenChange, taxonomy, onSave, onReset }: Omit<Pro
         <DialogHeader>
           <DialogTitle>Manage dropdown options</DialogTitle>
           <DialogDescription>
-            Add, rename or remove channels (utm_medium) and publishers (utm_source). Changes are saved in
-            this browser — use Export / Import to share a list with colleagues.
+            Add, rename or remove channels (utm_medium) and publishers (utm_source). Saved lists are shared
+            with everyone who uses this tool. Export / Import lets you back up or restore a list as JSON.
           </DialogDescription>
         </DialogHeader>
 
@@ -144,7 +157,7 @@ function ManageOptionsBody({ onOpenChange, taxonomy, onSave, onReset }: Omit<Pro
 
         <DialogFooter className="sm:justify-between">
           <div className="flex flex-wrap gap-2">
-            <Button variant="ghost" size="sm" onClick={handleReset}>
+            <Button variant="ghost" size="sm" onClick={handleReset} disabled={busy}>
               <RotateCcw data-icon="inline-start" />
               Reset to defaults
             </Button>
@@ -161,7 +174,9 @@ function ManageOptionsBody({ onOpenChange, taxonomy, onSave, onReset }: Omit<Pro
             <Button variant="outline" onClick={() => onOpenChange(false)}>
               Cancel
             </Button>
-            <Button onClick={handleSave}>Save</Button>
+            <Button onClick={handleSave} disabled={busy}>
+              {busy ? "Saving…" : "Save for everyone"}
+            </Button>
           </div>
         </DialogFooter>
       </DialogContent>

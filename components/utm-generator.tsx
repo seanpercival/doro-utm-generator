@@ -57,11 +57,11 @@ export function UtmGenerator() {
   const [copied, setCopied] = useState(false)
   const [qr, setQr] = useState<{ url: string; data: string } | null>(null)
   const [manageOpen, setManageOpen] = useState(false)
-  const [saveState, setSaveState] = useState<"idle" | "saved" | "exists">("idle")
+  const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "exists" | "error">("idle")
   const savedUrls = useSavedUrls()
   const canShare = useSyncExternalStore(noopSubscribe, canShareSnapshot, canShareServer)
 
-  const { taxonomy, save: saveTaxonomy, reset: resetTaxonomy, isCustomized } = useTaxonomy()
+  const { taxonomy, save: saveTaxonomy, reset: resetTaxonomy, isCustomized, error: taxonomyError } = useTaxonomy()
   const channelGroups = taxonomy.channelGroups
   const publisherGroups = taxonomy.publisherGroups
   const allChannels = useMemo(() => channelGroups.flatMap((g) => g.options), [channelGroups])
@@ -114,9 +114,10 @@ export function UtmGenerator() {
     setTimeout(() => setCopied(false), 2000)
   }
 
-  const handleSave = () => {
-    if (!generatedUrl) return
-    const added = savedUrls.add({
+  const handleSave = async () => {
+    if (!generatedUrl || saveState === "saving") return
+    setSaveState("saving")
+    const result = await savedUrls.add({
       url: generatedUrl,
       country,
       medium: effectiveMedium,
@@ -124,7 +125,7 @@ export function UtmGenerator() {
       campaign,
       content,
     })
-    setSaveState(added ? "saved" : "exists")
+    setSaveState(result)
     setTimeout(() => setSaveState("idle"), 2000)
   }
 
@@ -257,6 +258,9 @@ export function UtmGenerator() {
                       ))}
                     </SelectContent>
                   </Select>
+                  {taxonomyError && (
+                    <p className="text-xs text-destructive">Could not load shared options: {taxonomyError}</p>
+                  )}
                   <p className="text-xs text-muted-foreground">
                     awa = awareness · con = consideration · pur = purchase · crm = existing customers
                   </p>
@@ -390,16 +394,22 @@ export function UtmGenerator() {
                       <Mail data-icon="inline-start" />
                       Email
                     </Button>
-                    <Button onClick={handleSave} size="lg" variant="outline" title="Save to the log below">
-                      {saveState === "idle" ? (
+                    <Button
+                      onClick={handleSave}
+                      size="lg"
+                      variant="outline"
+                      title="Save to the shared log below"
+                      disabled={saveState === "saving"}
+                    >
+                      {saveState === "idle" || saveState === "saving" ? (
                         <>
                           <Bookmark data-icon="inline-start" />
-                          Save
+                          {saveState === "saving" ? "Saving…" : "Save"}
                         </>
                       ) : (
                         <>
                           <BookmarkCheck data-icon="inline-start" />
-                          {saveState === "saved" ? "Saved!" : "Already saved"}
+                          {saveState === "saved" ? "Saved!" : saveState === "exists" ? "Already saved" : "Save failed"}
                         </>
                       )}
                     </Button>
@@ -440,6 +450,9 @@ export function UtmGenerator() {
       <div className="mt-8">
         <SavedUrlsLog
           entries={savedUrls.entries}
+          status={savedUrls.status}
+          error={savedUrls.error}
+          onReload={savedUrls.reload}
           onSetNote={savedUrls.setNote}
           onRemove={savedUrls.remove}
           onClear={savedUrls.clear}

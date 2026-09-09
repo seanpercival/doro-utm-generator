@@ -1,153 +1,87 @@
 "use client"
 
-import { useCallback, useMemo, useSyncExternalStore } from "react"
-import { CHANNEL_GROUPS, PUBLISHER_GROUPS } from "@/lib/utm-config"
+import { useCallback, useEffect, useSyncExternalStore } from "react"
+import { DEFAULT_TAXONOMY, type Taxonomy, cleanTaxonomy, isDefaultTaxonomy } from "@/lib/taxonomy"
 
-/** A named group of dropdown options (used for both channels and publishers). */
-export type OptionGroup = {
-  label: string
-  options: string[]
-}
+export type { OptionGroup, Taxonomy } from "@/lib/taxonomy"
+export { DEFAULT_TAXONOMY, cleanTaxonomy, normalizeChannel, normalizePublisher, parseTaxonomy } from "@/lib/taxonomy"
 
-export type Taxonomy = {
-  channelGroups: OptionGroup[]
-  publisherGroups: OptionGroup[]
-}
+type Status = "idle" | "loading" | "ready" | "error"
+type State = { taxonomy: Taxonomy; status: Status; error: string | null }
 
-export const STORAGE_KEY = "doro-utm-taxonomy-v1"
-
-export const DEFAULT_TAXONOMY: Taxonomy = {
-  channelGroups: CHANNEL_GROUPS.map((g) => ({ label: g.label, options: [...g.channels] })),
-  publisherGroups: PUBLISHER_GROUPS.map((g) => ({ label: g.label, options: [...g.publishers] })),
-}
-
-/** Channel values: lowercase, "_" or "-" allowed, nothing else. */
-export function normalizeChannel(v: string) {
-  return v
-    .toLowerCase()
-    .replace(/\s+/g, "_")
-    .replace(/[^a-z0-9_-]/g, "")
-}
-
-/** Publisher values: keep case (matches historical GA4 data), just trim. */
-export function normalizePublisher(v: string) {
-  return v.trim()
-}
-
-/** Drop empty labels/options and duplicates, so a saved taxonomy is always clean. */
-export function cleanTaxonomy(t: Taxonomy): Taxonomy {
-  const clean = (groups: OptionGroup[], norm: (s: string) => string) => {
-    const seen = new Set<string>()
-    return groups
-      .map((g) => ({
-        label: g.label.trim() || "Untitled",
-        options: g.options
-          .map(norm)
-          .filter((o) => {
-            if (!o || seen.has(o)) return false
-            seen.add(o)
-            return true
-          }),
-      }))
-      .filter((g) => g.options.length > 0)
-  }
-  return {
-    channelGroups: clean(t.channelGroups, normalizeChannel),
-    publisherGroups: clean(t.publisherGroups, normalizePublisher),
-  }
-}
-
-function isOptionGroupArray(v: unknown): v is OptionGroup[] {
-  return (
-    Array.isArray(v) &&
-    v.every(
-      (g) =>
-        g &&
-        typeof g === "object" &&
-        typeof (g as OptionGroup).label === "string" &&
-        Array.isArray((g as OptionGroup).options) &&
-        (g as OptionGroup).options.every((o) => typeof o === "string"),
-    )
-  )
-}
-
-/** Validate untrusted JSON (localStorage or an imported file). Returns null if invalid. */
-export function parseTaxonomy(raw: unknown): Taxonomy | null {
-  if (!raw || typeof raw !== "object") return null
-  const t = raw as Partial<Taxonomy>
-  if (!isOptionGroupArray(t.channelGroups) || !isOptionGroupArray(t.publisherGroups)) return null
-  const cleaned = cleanTaxonomy({ channelGroups: t.channelGroups, publisherGroups: t.publisherGroups })
-  if (cleaned.channelGroups.length === 0 || cleaned.publisherGroups.length === 0) return null
-  return cleaned
-}
-
+// Module-level store shared by every component; the server snapshot is the defaults.
+const SERVER_STATE: State = { taxonomy: DEFAULT_TAXONOMY, status: "idle", error: null }
+let state: State = SERVER_STATE
 const listeners = new Set<() => void>()
 
-function emit() {
+function setState(patch: Partial<State>) {
+  state = { ...state, ...patch }
   listeners.forEach((l) => l())
 }
-
-function subscribe(listener: () => void) {
-  listeners.add(listener)
-  window.addEventListener("storage", listener)
-  return () => {
-    listeners.delete(listener)
-    window.removeEventListener("storage", listener)
-  }
+const subscribe = (l: () => void) => {
+  listeners.add(l)
+  return () => listeners.delete(l)
 }
+const getSnapshot = () => state
+const getServerSnapshot = () => SERVER_STATE
 
-function getSnapshot(): string | null {
+async function load() {
+  if (state.status === "loading") return
+  setState({ status: "loading", error: null })
   try {
-    return window.localStorage.getItem(STORAGE_KEY)
-  } catch {
-    return null
+    const res = await fetch("/api/taxonomy", { cache: "no-store" })
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    const { taxonomy } = (await res.json()) as { taxonomy: Taxonomy | null }
+    setState({ taxonomy: taxonomy ?? DEFAULT_TAXONOMY, status: "ready" })
+  } catch (e) {
+    setState({ status: "error", error: e instanceof Error ? e.message : "Failed to load options" })
   }
 }
 
-function getServerSnapshot(): string | null {
-  return null
-}
-
-function parseRaw(raw: string | null): Taxonomy | null {
-  if (!raw) return null
-  try {
-    return parseTaxonomy(JSON.parse(raw))
-  } catch {
-    return null
-  }
-}
-
-/**
- * Taxonomy state persisted in the browser (localStorage), exposed as an external store
- * so the server render and first client render both see the defaults (no hydration mismatch).
- */
+/** Shared dropdown lists, stored in Supabase and visible to everyone using the tool. */
 export function useTaxonomy() {
-  const raw = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot)
-  const taxonomy = useMemo(() => parseRaw(raw) ?? DEFAULT_TAXONOMY, [raw])
+  const s = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot)
 
-  const save = useCallback((next: Taxonomy) => {
+  useEffect(() => {
+    if (state.status === "idle") void load()
+  }, [])
+
+  const save = useCallback(async (next: Taxonomy): Promise<boolean> => {
     const cleaned = cleanTaxonomy(next)
     try {
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(cleaned))
-    } catch {
-      /* storage unavailable (private mode etc.) */
+      const res = await fetch("/api/taxonomy", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(cleaned),
+      })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      setState({ taxonomy: cleaned, status: "ready", error: null })
+      return true
+    } catch (e) {
+      setState({ error: e instanceof Error ? e.message : "Failed to save options" })
+      return false
     }
-    emit()
   }, [])
 
-  const reset = useCallback(() => {
+  const reset = useCallback(async (): Promise<boolean> => {
     try {
-      window.localStorage.removeItem(STORAGE_KEY)
-    } catch {
-      /* ignore */
+      const res = await fetch("/api/taxonomy", { method: "DELETE" })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      setState({ taxonomy: DEFAULT_TAXONOMY, status: "ready", error: null })
+      return true
+    } catch (e) {
+      setState({ error: e instanceof Error ? e.message : "Failed to reset options" })
+      return false
     }
-    emit()
   }, [])
 
-  const isCustomized = useMemo(
-    () => JSON.stringify(taxonomy) !== JSON.stringify(DEFAULT_TAXONOMY),
-    [taxonomy],
-  )
-
-  return { taxonomy, save, reset, isCustomized }
+  return {
+    taxonomy: s.taxonomy,
+    status: s.status,
+    error: s.error,
+    save,
+    reset,
+    reload: load,
+    isCustomized: !isDefaultTaxonomy(s.taxonomy),
+  }
 }
